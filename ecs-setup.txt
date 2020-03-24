@@ -1,0 +1,49 @@
+-------------------------------------------------------
+ECS Cluster setup
+-------------------------------------------------------
+$ aws ecs create-cluster --cluster-name ecs-scaling
+
+$ aws ec2 run-instances --image-id ami-2b3b6041 --count 1 --instance-type t2.micro --iam-instance-profile Name=ecsInstanceRole \
+--key-name ecs-key-pair-us-east-1 --security-group-ids sg-69e3fc1c --user-data \
+file:///Users/markthill/projects/aws/ecs-cluster-setup/copy-ecs-config-to-s3
+
+$ aws ecs list-container-instances --cluster ecs-scaling
+
+grab the instance id:  i-0addefc0c116737b5
+
+# Create the task definition for nginx
+$ aws ecs register-task-definition --cli-input-json file:///Users/markthill/projects/aws/ecs-cluster-setup/web-task-definition.json
+
+$ aws ecs list-task-definition-families
+
+# Create a service
+aws ecs create-service --cluster ecs-scaling --service-name web-nginx --task-definition web-nginx --desired-count 1
+
+# list services
+$ aws ecs list-services --cluster ecs-scaling
+
+# Describe services
+$ aws ecs describe-services --cluster ecs-scaling --services web-nginx
+
+$ aws ec2 describe-instances
+
+get the public dns:  ec2-52-87-226-63.compute-1.amazonaws.com
+
+# Attempt to add another service, but failed because on the same port
+$ aws ecs update-service --cluster ecs-scaling --service web-nginx --task-definition web-nginx --desired-count 2
+
+
+-------------------------------------------------------
+ECS Cluster teardown
+-------------------------------------------------------
+
+# Remove service by first setting count to 0
+aws ecs update-service --cluster ecs-scaling --service web-nginx --task-definition web-nginx --desired-count 0
+
+# Then remove the service
+aws ecs delete-service --cluster ecs-scaling --service web-nginx
+
+# list services to see that it is gone
+aws ecs list-services --cluster ecs-scaling
+
+$ aws ec2 terminate-instances --instance-ids i-0addefc0c116737b5
