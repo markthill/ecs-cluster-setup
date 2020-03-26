@@ -7,9 +7,9 @@ $ aws ec2 run-instances --image-id ami-2b3b6041 --count 1 --instance-type t2.mic
 --key-name ecs-key-pair-us-east-1 --security-group-ids sg-69e3fc1c --user-data \
 file:///Users/markthill/projects/aws/ecs-cluster-setup/copy-ecs-config-to-s3
 
-$ aws ecs list-container-instances --cluster ecs-scaling
+grab the instance id from the output:  i-0e219bc66c3934ee8
 
-grab the instance id:  i-0addefc0c116737b5
+$ aws ecs list-container-instances --cluster ecs-scaling 
 
 # Create the task definition for nginx
 $ aws ecs register-task-definition --cli-input-json file:///Users/markthill/projects/aws/ecs-cluster-setup/web-task-definition.json
@@ -25,12 +25,39 @@ $ aws ecs list-services --cluster ecs-scaling
 # Describe services
 $ aws ecs describe-services --cluster ecs-scaling --services web-nginx
 
+# List all the running tasks
+$ aws ecs list-tasks --cluster ecs-scaling
+
+# Describe a task (using arn from above call)
+aws ecs describe-tasks --cluster ecs-scaling  --tasks arn:aws:ecs:us-east-1:236189869841:task/ecs-scaling/ce442647161b40af8bddc95c7cc48b11
+
 $ aws ec2 describe-instances
 
-get the public dns:  ec2-52-87-226-63.compute-1.amazonaws.com
+get the public dns:  ec2-3-87-243-191.compute-1.amazonaws.com
 
 # Attempt to add another service, but failed because on the same port
 $ aws ecs update-service --cluster ecs-scaling --service web-nginx --task-definition web-nginx --desired-count 2
+
+# SSH to the ec2 instance
+ssh -i /Users/markthill/projects/aws/key-pairs/ecs-key-pair-us-east-1.pem ec2-user@ec2-3-86-107-4.compute-1.amazonaws.com
+
+-------------------------------------------------------
+Simulate Work
+-------------------------------------------------------
+
+# pull the docker image we will use to simulate load
+docker pull williamyeh/wrk
+
+# get the hostname of the machine.  Use public dns of ec2
+hostname -I | cut -d ' ' -f 1
+
+# simulate Work
+docker run --rm williamyeh/wrk -t10 -c50 -d10s http://ec2-3-87-243-191.compute-1.amazonaws.com/
+
+# Show the stats of the container
+$ docker ps
+# Take the container id and use it in
+$ docker stats 4fffe63fda5d
 
 
 -------------------------------------------------------
@@ -47,3 +74,36 @@ aws ecs delete-service --cluster ecs-scaling --service web-nginx
 aws ecs list-services --cluster ecs-scaling
 
 $ aws ec2 terminate-instances --instance-ids i-0addefc0c116737b5
+
+# Delete the cluster
+$ aws ecs delete-cluster --cluster ecs-scaling
+
+-------------------------------------------------------
+Cloudwatch Metrics
+-------------------------------------------------------
+
+aws cloudwatch get-metric-statistics --namespace ecs --metric-name CPUUtilization \ 
+--statistics "Sum" "Maximum" "Minimum" "Average" "SampleCount" \ 
+--start-time 2016-10-20T12:00:00.000Z --end-time 2016-10-20T12:05:00.000Z --period 60
+
+aws cloudwatch get-metric-statistics --metric-name CPUUtilization --start-time 2020-03-25T07:00:00Z \
+--end-time 2020-03-25T23:08:00Z --period 3600 --namespace AWS/EC2 --statistics Maximum Minimum Sum Average SampleCount \
+--dimensions Name=InstanceId,Value=i-0cb8168a3dd4bb140
+
+
+-------------------------------------------------------
+Cloudwatch Metrics Service Utilization
+-------------------------------------------------------
+
+                                      (Total CPU units used by tasks in service) x 100
+Service CPU utilization =  ----------------------------------------------------------------------------
+                           (Total CPU units specified in task definition) x (number of tasks in service)
+
+            Example     .30 Cpu Units x 100         30
+                        -------------------  =    ------  = .14 or 14%
+                            102 X 2                 204
+
+
+                                         (Total MiB of memory used by tasks in service) x 100
+Service memory utilization =  --------------------------------------------------------------------------------
+                              (Total MiB of memory specified in task definition) x (number of tasks in service)
