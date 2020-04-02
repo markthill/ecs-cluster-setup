@@ -7,9 +7,10 @@ $ aws ec2 run-instances --image-id ami-2b3b6041 --count 1 --instance-type t2.mic
 --key-name ecs-key-pair-us-east-1 --security-group-ids sg-69e3fc1c --user-data \
 file:///Users/markthill/projects/aws/ecs-cluster-setup/copy-ecs-config-to-s3
 
-grab the instance id from the output:  i-0e219bc66c3934ee8
-
+grab the instance id from the output:  i-098e2f71df579b7b5
 $ aws ecs list-container-instances --cluster ecs-scaling 
+
+grab the public dns from describe-instances:  ec2-54-210-29-124.compute-1.amazonaws.com
 
 # Create the task definition for nginx
 $ aws ecs register-task-definition --cli-input-json file:///Users/markthill/projects/aws/ecs-cluster-setup/web-task-definition.json
@@ -18,6 +19,11 @@ $ aws ecs list-task-definition-families
 
 # Create a service
 aws ecs create-service --cluster ecs-scaling --service-name web-nginx --task-definition web-nginx --desired-count 1
+
+aws ecs create-service --cluster ecs-scaling --service-name web-nginx --task-definition web-nginx --desired-count 0 --tags key=Environment,value=development key=Tier,value=ecs  key=MinimumServiceSize,value=1 key=MaximumServiceSize,value=3
+
+# get the port for the task
+aws ecs describe-tasks --cluster ecs-scaling  --tasks arn:aws:ecs:us-east-1:236189869841:task/ecs-scaling/40201c7ebe304aaaa7bfb2fd320cc3b4
 
 # list services
 $ aws ecs list-services --cluster ecs-scaling
@@ -39,7 +45,7 @@ get the public dns:  ec2-3-87-243-191.compute-1.amazonaws.com
 $ aws ecs update-service --cluster ecs-scaling --service web-nginx --task-definition web-nginx --desired-count 2
 
 # SSH to the ec2 instance
-ssh -i /Users/markthill/projects/aws/key-pairs/ecs-key-pair-us-east-1.pem ec2-user@ec2-3-86-107-4.compute-1.amazonaws.com
+ssh -i /Users/markthill/projects/aws/key-pairs/ecs-key-pair-us-east-1.pem ec2-user@ec2-3-95-171-25.compute-1.amazonaws.com
 
 -------------------------------------------------------
 Simulate Work
@@ -73,7 +79,7 @@ aws ecs delete-service --cluster ecs-scaling --service web-nginx
 # list services to see that it is gone
 aws ecs list-services --cluster ecs-scaling
 
-$ aws ec2 terminate-instances --instance-ids i-0addefc0c116737b5
+$ aws ec2 terminate-instances --instance-ids i-09d216579ffa1568b
 
 # Delete the cluster
 $ aws ecs delete-cluster --cluster ecs-scaling

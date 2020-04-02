@@ -1,0 +1,19 @@
+{
+    "TargetValue":75.0,
+    "CustomizedMetricSpecification":{
+       "MetricName":"CPUUtilization",
+       "Namespace":"AWS/ECS",
+       "Dimensions":[
+        {
+            "Name":"ServiceName",
+            "Value":"web-nginx"
+         },
+          {
+             "Name":"ClusterName",
+             "Value":"ecs-scaling"
+          }
+       ],
+       "Statistic":"Average",
+       "Unit":"Percent"
+    }
+ }
