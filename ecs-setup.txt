@@ -7,10 +7,13 @@ $ aws ec2 run-instances --image-id ami-2b3b6041 --count 1 --instance-type t2.mic
 --key-name ecs-key-pair-us-east-1 --security-group-ids sg-69e3fc1c --user-data \
 file:///Users/markthill/projects/aws/ecs-cluster-setup/copy-ecs-config-to-s3
 
-grab the instance id from the output:  i-098e2f71df579b7b5
-$ aws ecs list-container-instances --cluster ecs-scaling 
+grab the instance id from the output:  i-014ba444f0f5b50f0
 
-grab the public dns from describe-instances:  ec2-54-210-29-124.compute-1.amazonaws.com
+$ aws ec2 describe-instances
+
+grab the public dns from describe-instances:  ec2-18-208-169-73.compute-1.amazonaws.com
+
+$ aws ecs list-container-instances --cluster ecs-scaling 
 
 # Create the task definition for nginx
 $ aws ecs register-task-definition --cli-input-json file:///Users/markthill/projects/aws/ecs-cluster-setup/web-task-definition.json
@@ -20,7 +23,7 @@ $ aws ecs list-task-definition-families
 # Create a service
 aws ecs create-service --cluster ecs-scaling --service-name web-nginx --task-definition web-nginx --desired-count 1
 
-aws ecs create-service --cluster ecs-scaling --service-name web-nginx --task-definition web-nginx --desired-count 0 --tags key=Environment,value=development key=Tier,value=ecs  key=MinimumServiceSize,value=1 key=MaximumServiceSize,value=3
+aws ecs create-service --cluster ecs-scaling --service-name web-nginx --task-definition web-nginx --desired-count 1 --tags key=Environment,value=development key=Tier,value=ecs  key=MinimumServiceSize,value=1 key=MaximumServiceSize,value=3
 
 # get the port for the task
 aws ecs describe-tasks --cluster ecs-scaling  --tasks arn:aws:ecs:us-east-1:236189869841:task/ecs-scaling/40201c7ebe304aaaa7bfb2fd320cc3b4
@@ -45,7 +48,7 @@ get the public dns:  ec2-3-87-243-191.compute-1.amazonaws.com
 $ aws ecs update-service --cluster ecs-scaling --service web-nginx --task-definition web-nginx --desired-count 2
 
 # SSH to the ec2 instance
-ssh -i /Users/markthill/projects/aws/key-pairs/ecs-key-pair-us-east-1.pem ec2-user@ec2-3-95-171-25.compute-1.amazonaws.com
+ssh -i /Users/markthill/projects/aws/key-pairs/ecs-key-pair-us-east-1.pem ec2-user@ec2-18-208-169-73.compute-1.amazonaws.com
 
 -------------------------------------------------------
 Simulate Work
@@ -58,7 +61,7 @@ docker pull williamyeh/wrk
 hostname -I | cut -d ' ' -f 1
 
 # simulate Work
-docker run --rm williamyeh/wrk -t10 -c50 -d10s http://ec2-3-87-243-191.compute-1.amazonaws.com/
+docker run --rm williamyeh/wrk -t10 -c500 -d10s http://ec2-18-208-169-73.compute-1.amazonaws.com:32777
 
 # Show the stats of the container
 $ docker ps
@@ -79,7 +82,7 @@ aws ecs delete-service --cluster ecs-scaling --service web-nginx
 # list services to see that it is gone
 aws ecs list-services --cluster ecs-scaling
 
-$ aws ec2 terminate-instances --instance-ids i-09d216579ffa1568b
+$ aws ec2 terminate-instances --instance-ids i-003f83d64a375c794
 
 # Delete the cluster
 $ aws ecs delete-cluster --cluster ecs-scaling
@@ -113,3 +116,80 @@ Service CPU utilization =  -----------------------------------------------------
                                          (Total MiB of memory used by tasks in service) x 100
 Service memory utilization =  --------------------------------------------------------------------------------
                               (Total MiB of memory specified in task definition) x (number of tasks in service)
+
+
+statistics
+aws cloudwatch get-metric-statistics --metric-name CPUUtilization --start-time 2020-03-31T20:00:00Z --end-time 2020-03-31T20:10:00Z --period 60 --namespace AWS/EC2 --statistics Maximum --dimensions Name=InstanceId,Value=i-0046fec81687d53a0
+
+aws cloudwatch get-metric-statistics --metric-name CPUUtilization --start-time 2020-04-01T17:00:00Z --end-time 2020-04-01T17:30:00Z --period 60 --namespace AWS/ECS --statistics Maximum --dimensions Name=ClusterName,Value=ecs-scaling 
+
+aws cloudwatch put-metric-data --metric-name CPUUtilization --namespace AWS/ECS --value 10 --unit Percent --dimensions Name=ClusterName,Value=ecs-scaling Name=ServiceName,Value=web-nginx
+
+------------------------------
+target tracking scaling
+------------------------------
+
+aws application-autoscaling describe-scalable-targets --service-namespace ecs
+
+aws application-autoscaling register-scalable-target \
+    --service-namespace ecs \
+    --scalable-dimension ecs:service:DesiredCount \
+    --resource-id service/ecs-scaling/web-nginx \
+    --min-capacity 1 \
+    --max-capacity 4
+
+aws application-autoscaling put-scaling-policy --service-namespace ecs \
+  --scalable-dimension ecs:service:DesiredCount \
+  --resource-id service/ecs-scaling/web-nginx \
+  --policy-name ecs-scaling-policy --policy-type TargetTrackingScaling \
+  --target-tracking-scaling-policy-configuration file:///Users/markthill/projects/aws/ecs-cluster-setup/target-tracking-scaling-policy.json
+
+aws application-autoscaling delete-scaling-policy --service-namespace ecs \
+  --scalable-dimension ecs:service:DesiredCount \
+  --resource-id service/ecs-scaling/web-nginx \
+  --policy-name ecs-scaling-policy
+
+------------------------------
+step scaling
+------------------------------
+OUT
+------
+
+aws application-autoscaling put-scaling-policy --service-namespace ecs \
+  --scalable-dimension ecs:service:DesiredCount \
+  --resource-id service/ecs-scaling/web-nginx \
+  --policy-name ecs-step-scaling-policy --policy-type StepScaling \
+  --step-scaling-policy-configuration file:///Users/markthill/projects/aws/ecs-cluster-setup/step-scaling-policy-out.json
+
+get the policy arn
+
+"PolicyARN": "arn:aws:autoscaling:us-east-1:236189869841:scalingPolicy:71b69421-42d6-4f4a-a2ce-e4b17402110e:resource/ecs/service/ecs-scaling/web-nginx:policyName/ecs-step-scaling-policy",
+
+aws cloudwatch put-metric-alarm --alarm-name Step-Scaling-AlarmHigh-ECS:service/ecs-scaling/web-nginx \
+  --metric-name CPUUtilization --namespace AWS/ECS --statistic Average \
+  --period 60 --evaluation-periods 2 --threshold 30 \
+  --comparison-operator GreaterThanOrEqualToThreshold \
+  --dimensions Name=ClusterName,Value=ecs-scaling Name=ServiceName,Value=web-nginx \
+  --alarm-actions arn:aws:autoscaling:us-east-1:236189869841:scalingPolicy:71b69421-42d6-4f4a-a2ce-e4b17402110e:resource/ecs/service/ecs-scaling/web-nginx:policyName/ecs-step-scaling-policy
+
+IN
+--------
+
+aws application-autoscaling put-scaling-policy --service-namespace ecs \
+  --scalable-dimension ecs:service:DesiredCount \
+  --resource-id service/ecs-scaling/web-nginx \
+  --policy-name ecs-step-scaling-policy-in --policy-type StepScaling \
+  --step-scaling-policy-configuration file:///Users/markthill/projects/aws/ecs-cluster-setup/step-scaling-policy-in.json
+
+get the policy arn
+
+arn:aws:autoscaling:us-east-1:236189869841:scalingPolicy:71b69421-42d6-4f4a-a2ce-e4b17402110e:resource/ecs/service/ecs-scaling/web-nginx:policyName/ecs-step-scaling-policy-in
+
+aws cloudwatch put-metric-alarm --alarm-name Step-Scaling-AlarmLow-ECS:service/ecs-scaling/web-nginx \
+  --metric-name CPUUtilization --namespace AWS/ECS --statistic Average \
+  --period 60 --evaluation-periods 2 --threshold 25 \
+  --comparison-operator LessThanOrEqualToThreshold \
+  --dimensions Name=ClusterName,Value=ecs-scaling Name=ServiceName,Value=web-nginx \
+  --alarm-actions arn:aws:autoscaling:us-east-1:236189869841:scalingPolicy:71b69421-42d6-4f4a-a2ce-e4b17402110e:resource/ecs/service/ecs-scaling/web-nginx:policyName/ecs-step-scaling-policy-in
+
+
